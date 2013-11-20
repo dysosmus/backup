@@ -9,7 +9,7 @@ module Backup
 
         ##
         # Amazon Simple Storage Service (S3) Credentials
-        attr_accessor :access_key_id, :secret_access_key
+        attr_accessor :access_key_id, :secret_access_key, :use_iam_profile
 
         ##
         # Amazon S3 bucket name
@@ -40,6 +40,11 @@ module Backup
         # Default: :standard
         attr_accessor :storage_class
 
+        ##
+        # Additional options to pass along to fog.
+        # e.g. Fog::Storage.new({ :provider => 'AWS' }.merge(fog_options))
+        attr_accessor :fog_options
+
         def initialize(syncer_id = nil)
           super
 
@@ -54,6 +59,7 @@ module Backup
           @cloud_io ||= CloudIO::S3.new(
             :access_key_id      => access_key_id,
             :secret_access_key  => secret_access_key,
+            :use_iam_profile    => use_iam_profile,
             :bucket             => bucket,
             :region             => region,
             :encryption         => encryption,
@@ -61,7 +67,8 @@ module Backup
             :max_retries        => max_retries,
             :retry_waitsec      => retry_waitsec,
             # Syncer can not use multipart upload.
-            :chunk_size         => 0
+            :chunk_size         => 0,
+            :fog_options        => fog_options
           )
         end
 
@@ -75,7 +82,11 @@ module Backup
         end
 
         def check_configuration
-          required = %w{ access_key_id secret_access_key bucket }
+          if use_iam_profile
+            required = %w{ bucket }
+          else
+            required = %w{ access_key_id secret_access_key bucket }
+          end
           raise Error, <<-EOS if required.map {|name| send(name) }.any?(&:nil?)
             Configuration Error
             #{ required.map {|name| "##{ name }"}.join(', ') } are all required

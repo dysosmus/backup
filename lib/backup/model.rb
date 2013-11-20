@@ -25,6 +25,18 @@ module Backup
           all.select {|model| trigger == model.trigger }
         end
       end
+
+      # Allows users to create preconfigured models.
+      def preconfigure(&block)
+        @preconfigure ||= block
+      end
+
+      private
+
+      # used for testing
+      def reset!
+        @all = @preconfigure = nil
+      end
     end
 
     ##
@@ -111,6 +123,7 @@ module Backup
       @notifiers  = []
       @syncers    = []
 
+      instance_eval(&self.class.preconfigure) if self.class.preconfigure
       instance_eval(&block) if block_given?
 
       # trigger all defined databases to generate their #dump_filename
@@ -214,7 +227,8 @@ module Backup
     #
     # If any exception is raised, any defined +after+ hook will be skipped.
     def before(&block)
-      @before ||= block
+      @before = block if block
+      @before
     end
 
     ##
@@ -241,7 +255,8 @@ module Backup
     # the exit_status will be elevated to 2. If the exception is not a
     # StandardError, the exit_status will be elevated to 3.
     def after(&block)
-      @after ||= block
+      @after = block if block
+      @after
     end
 
     ##

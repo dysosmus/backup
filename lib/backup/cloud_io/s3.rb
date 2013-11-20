@@ -13,19 +13,22 @@ module Backup
       MAX_FILE_SIZE       = 1024**3 * 5   # 5 GiB
       MAX_MULTIPART_SIZE  = 1024**4 * 5   # 5 TiB
 
-      attr_reader :access_key_id, :secret_access_key, :region, :bucket,
-                  :chunk_size, :encryption, :storage_class
+      attr_reader :access_key_id, :secret_access_key, :use_iam_profile,
+                  :region, :bucket, :chunk_size, :encryption, :storage_class,
+                  :fog_options
 
       def initialize(options = {})
         super
 
         @access_key_id      = options[:access_key_id]
         @secret_access_key  = options[:secret_access_key]
+        @use_iam_profile    = options[:use_iam_profile]
         @region             = options[:region]
         @bucket             = options[:bucket]
         @chunk_size         = options[:chunk_size]
         @encryption         = options[:encryption]
         @storage_class      = options[:storage_class]
+        @fog_options        = options[:fog_options]
       end
 
       # The Syncer may call this method in multiple threads.
@@ -120,12 +123,17 @@ module Backup
 
       def connection
         @connection ||= begin
-          conn = Fog::Storage.new(
-            :provider               => 'AWS',
-            :aws_access_key_id      => access_key_id,
-            :aws_secret_access_key  => secret_access_key,
-            :region                 => region
-          )
+          opts = { :provider => 'AWS', :region => region }
+          if use_iam_profile
+            opts.merge!(:use_iam_profile => true)
+          else
+            opts.merge!(
+              :aws_access_key_id      => access_key_id,
+              :aws_secret_access_key  => secret_access_key
+            )
+          end
+          opts.merge!(fog_options || {})
+          conn = Fog::Storage.new(opts)
           conn.sync_clock
           conn
         end

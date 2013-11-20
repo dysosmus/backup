@@ -397,15 +397,7 @@ describe CloudIO::S3 do
   end # describe '#delete'
 
   describe '#connection' do
-    let(:cloud_io) {
-      CloudIO::S3.new(
-        :access_key_id => 'my_access_key_id',
-        :secret_access_key => 'my_secret_access_key',
-        :region => 'my_region'
-      )
-    }
-
-    it 'caches a connection' do
+    specify 'using AWS access keys' do
       Fog::Storage.expects(:new).once.with(
         :provider               => 'AWS',
         :aws_access_key_id      => 'my_access_key_id',
@@ -414,8 +406,50 @@ describe CloudIO::S3 do
       ).returns(connection)
       connection.expects(:sync_clock).once
 
+      cloud_io = CloudIO::S3.new(
+        :access_key_id      => 'my_access_key_id',
+        :secret_access_key  => 'my_secret_access_key',
+        :region             => 'my_region'
+      )
+
       expect( cloud_io.send(:connection) ).to be connection
       expect( cloud_io.send(:connection) ).to be connection
+    end
+
+    specify 'using AWS IAM profile' do
+      Fog::Storage.expects(:new).once.with(
+        :provider               => 'AWS',
+        :use_iam_profile        => true,
+        :region                 => 'my_region'
+      ).returns(connection)
+      connection.expects(:sync_clock).once
+
+      cloud_io = CloudIO::S3.new(
+        :use_iam_profile  => true,
+        :region           => 'my_region'
+      )
+
+      expect( cloud_io.send(:connection) ).to be connection
+      expect( cloud_io.send(:connection) ).to be connection
+    end
+
+    it 'passes along fog_options' do
+      Fog::Storage.expects(:new).with({
+          :provider => 'AWS',
+          :region => nil,
+          :aws_access_key_id => 'my_key',
+          :aws_secret_access_key => 'my_secret',
+          :connection_options => { :opt_key => 'opt_value' },
+          :my_key => 'my_value'
+      }).returns(stub(:sync_clock))
+      CloudIO::S3.new(
+        :access_key_id => 'my_key',
+        :secret_access_key => 'my_secret',
+        :fog_options => {
+          :connection_options => { :opt_key => 'opt_value' },
+          :my_key => 'my_value'
+        }
+      ).send(:connection)
     end
   end # describe '#connection'
 

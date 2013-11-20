@@ -10,6 +10,12 @@ describe Syncer::Cloud::S3 do
       s3.bucket             = 'my_bucket'
     end
   }
+  let(:required_iam_config) {
+    Proc.new do |s3|
+      s3.use_iam_profile  = true
+      s3.bucket           = 'my_bucket'
+    end
+  }
   let(:syncer) { Syncer::Cloud::S3.new(&required_config) }
 
   it_behaves_like 'a class that includes Configuration::Helpers' do
@@ -28,14 +34,17 @@ describe Syncer::Cloud::S3 do
   describe '#initialize' do
     it 'provides default values' do
       # required
+      expect( syncer.bucket             ).to eq 'my_bucket'
+      # required unless using IAM profile
       expect( syncer.access_key_id      ).to eq 'my_access_key_id'
       expect( syncer.secret_access_key  ).to eq 'my_secret_access_key'
-      expect( syncer.bucket             ).to eq 'my_bucket'
 
       # defaults
-      expect( syncer.region         ).to be_nil
-      expect( syncer.encryption     ).to be_nil
-      expect( syncer.storage_class  ).to eq :standard
+      expect( syncer.use_iam_profile  ).to be_nil
+      expect( syncer.region           ).to be_nil
+      expect( syncer.encryption       ).to be_nil
+      expect( syncer.storage_class    ).to eq :standard
+      expect( syncer.fog_options      ).to be_nil
 
       # from Syncer::Cloud::Base
       expect( syncer.thread_count   ).to be 0
@@ -62,6 +71,7 @@ describe Syncer::Cloud::S3 do
         s3.retry_waitsec      = 45
         s3.path               = 'my_backups'
         s3.mirror             = true
+        s3.fog_options        = { :my_key => 'my_value' }
 
         s3.directories do
           add '/this/path'
@@ -71,6 +81,7 @@ describe Syncer::Cloud::S3 do
 
       expect( syncer.access_key_id      ).to eq 'my_access_key_id'
       expect( syncer.secret_access_key  ).to eq 'my_secret_access_key'
+      expect( syncer.use_iam_profile    ).to be_nil
       expect( syncer.bucket             ).to eq 'my_bucket'
       expect( syncer.region             ).to eq 'my_region'
       expect( syncer.encryption         ).to eq :aes256
@@ -81,31 +92,8 @@ describe Syncer::Cloud::S3 do
       expect( syncer.path               ).to eq 'my_backups'
       expect( syncer.syncer_id          ).to eq :my_id
       expect( syncer.mirror             ).to be(true)
+      expect( syncer.fog_options        ).to eq :my_key => 'my_value'
       expect( syncer.directories        ).to eq ['/this/path', 'that/path']
-    end
-
-    it 'requires access_key_id' do
-      pre_config = required_config
-      expect do
-        Syncer::Cloud::S3.new do |s3|
-          pre_config.call(s3)
-          s3.access_key_id = nil
-        end
-      end.to raise_error {|err|
-        expect( err.message ).to match(/are all required/)
-      }
-    end
-
-    it 'requires secret_access_key' do
-      pre_config = required_config
-      expect do
-        Syncer::Cloud::S3.new do |s3|
-          pre_config.call(s3)
-          s3.secret_access_key = nil
-        end
-      end.to raise_error {|err|
-        expect( err.message ).to match(/are all required/)
-      }
     end
 
     it 'requires bucket' do
@@ -118,6 +106,43 @@ describe Syncer::Cloud::S3 do
       end.to raise_error {|err|
         expect( err.message ).to match(/are all required/)
       }
+    end
+
+    context 'when using AWS IAM profile' do
+      it 'does not require access_key_id or secret_access_key' do
+        pre_config = required_iam_config
+        expect do
+          Syncer::Cloud::S3.new do |s3|
+            pre_config.call(s3)
+          end
+        end.not_to raise_error
+      end
+    end
+
+    context 'when using AWS access keys' do
+      it 'requires access_key_id' do
+        pre_config = required_config
+        expect do
+          Syncer::Cloud::S3.new do |s3|
+            pre_config.call(s3)
+            s3.access_key_id = nil
+          end
+        end.to raise_error {|err|
+          expect( err.message ).to match(/are all required/)
+        }
+      end
+
+      it 'requires secret_access_key' do
+        pre_config = required_config
+        expect do
+          Syncer::Cloud::S3.new do |s3|
+            pre_config.call(s3)
+            s3.secret_access_key = nil
+          end
+        end.to raise_error {|err|
+          expect( err.message ).to match(/are all required/)
+        }
+      end
     end
 
     it 'validates encryption' do
@@ -147,18 +172,43 @@ describe Syncer::Cloud::S3 do
   end # describe '#initialize'
 
   describe '#cloud_io' do
-    it 'caches a new CloudIO instance' do
+    specify 'when using AWS access keys' do
       CloudIO::S3.expects(:new).once.with(
           :access_key_id      => 'my_access_key_id',
           :secret_access_key  => 'my_secret_access_key',
+          :use_iam_profile    => nil,
           :bucket             => 'my_bucket',
           :region             => nil,
           :encryption         => nil,
           :storage_class      => :standard,
           :max_retries        => 10,
           :retry_waitsec      => 30,
-          :chunk_size       => 0
+          :chunk_size         => 0,
+          :fog_options        => nil
       ).returns(:cloud_io)
+
+      syncer = Syncer::Cloud::S3.new(&required_config)
+
+      expect( syncer.send(:cloud_io) ).to eq :cloud_io
+      expect( syncer.send(:cloud_io) ).to eq :cloud_io
+    end
+
+    specify 'when using AWS IAM profile' do
+      CloudIO::S3.expects(:new).once.with(
+          :access_key_id      => nil,
+          :secret_access_key  => nil,
+          :use_iam_profile    => true,
+          :bucket             => 'my_bucket',
+          :region             => nil,
+          :encryption         => nil,
+          :storage_class      => :standard,
+          :max_retries        => 10,
+          :retry_waitsec      => 30,
+          :chunk_size         => 0,
+          :fog_options        => nil
+      ).returns(:cloud_io)
+
+      syncer = Syncer::Cloud::S3.new(&required_iam_config)
 
       expect( syncer.send(:cloud_io) ).to eq :cloud_io
       expect( syncer.send(:cloud_io) ).to eq :cloud_io
